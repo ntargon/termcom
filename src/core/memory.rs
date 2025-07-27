@@ -230,7 +230,7 @@ impl<T> BoundedVec<T> {
         
         if self.data.len() >= self.max_size {
             // Remove oldest item
-            if let Some(removed) = self.data.first() {
+            if let Some(_removed) = self.data.first() {
                 if let Some(ref mm) = self.memory_manager {
                     mm.record_deallocation(std::mem::size_of::<T>());
                 }
@@ -298,7 +298,6 @@ impl<T> std::ops::IndexMut<usize> for BoundedVec<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::time::sleep;
     
     #[tokio::test]
     async fn test_memory_manager_creation() {

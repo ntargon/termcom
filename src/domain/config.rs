@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /// TermCom configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

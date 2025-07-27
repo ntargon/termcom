@@ -9,7 +9,6 @@ use crate::domain::config::{
 };
 use crate::domain::error::TermComError;
 use crate::infrastructure::config::ConfigManager;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -62,7 +61,7 @@ pub async fn execute_command(args: Args) -> Result<(), TermComError> {
 async fn execute_serial_command(
     args: crate::cli::args::SerialArgs,
     writer: &ConsoleWriter,
-    config: &TermComConfig,
+    _config: &TermComConfig,
     _comm_engine: &Arc<CommunicationEngine>,
     session_manager: &Arc<RwLock<SessionManager>>,
 ) -> Result<(), TermComError> {
@@ -99,7 +98,7 @@ async fn execute_serial_command(
                 properties: std::collections::HashMap::new(),
             };
             
-            let mut manager = session_manager.write().await;
+            let manager = session_manager.write().await;
             manager.create_session(session_config).await?;
             
             writer.write_message(&format!("Serial session '{}' created for device '{}'", session_id, device_name))?;
@@ -185,7 +184,7 @@ async fn execute_tcp_command(
                 properties: std::collections::HashMap::new(),
             };
             
-            let mut manager = session_manager.write().await;
+            let manager = session_manager.write().await;
             manager.create_session(session_config).await?;
             
             writer.write_message(&format!("TCP session '{}' created for {}:{}", session_id, host, port))?;
@@ -221,7 +220,7 @@ async fn execute_tcp_command(
                 properties: std::collections::HashMap::new(),
             };
             
-            let mut manager = session_manager.write().await;
+            let manager = session_manager.write().await;
             manager.create_session(session_config).await?;
             
             writer.write_message(&format!("TCP server session '{}' created on {}:{}", session_id, bind, port))?;
@@ -293,19 +292,19 @@ async fn execute_session_command(
             Ok(())
         }
         SessionCommand::Start { id } => {
-            let mut manager = session_manager.write().await;
+            let manager = session_manager.write().await;
             manager.start_session(&id).await?;
             writer.write_message(&format!("Session '{}' started", id))?;
             Ok(())
         }
         SessionCommand::Stop { id } => {
-            let mut manager = session_manager.write().await;
+            let manager = session_manager.write().await;
             manager.stop_session(&id).await?;
             writer.write_message(&format!("Session '{}' stopped", id))?;
             Ok(())
         }
         SessionCommand::Remove { id } => {
-            let mut manager = session_manager.write().await;
+            let manager = session_manager.write().await;
             manager.remove_session(&id).await?;
             writer.write_message(&format!("Session '{}' removed", id))?;
             Ok(())
@@ -381,7 +380,7 @@ async fn execute_config_command(
             writer.write_devices(&config.devices)?;
             Ok(())
         }
-        ConfigCommand::AddDevice { name, description, connection } => {
+        ConfigCommand::AddDevice { name, description: _, connection } => {
             writer.write_message(&format!("Adding device '{}' with {:?} connection", name, connection))?;
             writer.write_message("Device addition to configuration not fully implemented yet")?;
             Ok(())

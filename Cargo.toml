@@ -71,6 +71,7 @@ tempfile = "3.8"
 [features]
 default = []
 property-testing = ["proptest"]
+gc = []
 
 [profile.release]
 opt-level = 3

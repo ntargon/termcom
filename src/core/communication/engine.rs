@@ -5,10 +5,10 @@ use crate::core::communication::{
 use crate::domain::{config::DeviceConfig, error::{TermComError, TermComResult}};
 use crate::infrastructure::{serial::SerialManager, tcp::TcpManager};
 use std::collections::VecDeque;
-use std::time::{Duration, SystemTime, Instant};
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock};
 use std::sync::{Arc, atomic::{AtomicUsize, AtomicU64, Ordering}};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Central communication engine that manages all transport types
 pub struct CommunicationEngine {

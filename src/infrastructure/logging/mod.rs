@@ -24,8 +24,6 @@ pub fn init_logging() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Log macros re-export for convenience
-pub use tracing::{info, warn, error, debug, trace};
 
 #[cfg(test)]
 mod tests {

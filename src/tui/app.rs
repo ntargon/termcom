@@ -21,7 +21,7 @@ use crate::{
 use super::{
     event::{AppEvent, EventHandler},
     state::AppState,
-    ui::{draw_ui, ActivePanel},
+    ui::draw_ui,
 };
 use std::sync::Arc;
 

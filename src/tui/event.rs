@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::{domain::error::TermComError, core::session::SessionId};
 
@@ -164,7 +164,7 @@ impl EventHandler {
         }
     }
 
-    fn handle_chat_panel(&self, key: KeyEvent, state: &mut AppState) -> Result<Option<AppEvent>, TermComError> {
+    fn handle_chat_panel(&self, key: KeyEvent, _state: &mut AppState) -> Result<Option<AppEvent>, TermComError> {
         match key.code {
             KeyCode::Char('i') => {
                 Ok(Some(AppEvent::ToggleInputMode))
@@ -181,7 +181,7 @@ impl EventHandler {
         }
     }
 
-    fn handle_connect_panel(&self, key: KeyEvent, state: &mut AppState) -> Result<Option<AppEvent>, TermComError> {
+    fn handle_connect_panel(&self, key: KeyEvent, _state: &mut AppState) -> Result<Option<AppEvent>, TermComError> {
         match key.code {
             KeyCode::Char('i') => {
                 Ok(Some(AppEvent::ToggleInputMode))

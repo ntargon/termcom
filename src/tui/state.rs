@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
-use uuid::Uuid;
 
 use crate::{
     core::session::{SessionId, SessionType, SessionManager, SessionConfig},

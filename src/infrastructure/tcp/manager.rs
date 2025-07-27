@@ -28,6 +28,7 @@ pub enum SessionStatus {
 pub struct SessionHandle {
     client: TcpClient,
     info: SessionInfo,
+    #[allow(dead_code)]
     message_sender: mpsc::UnboundedSender<TcpMessage>,
 }
 

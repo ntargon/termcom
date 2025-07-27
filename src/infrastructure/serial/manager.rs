@@ -3,7 +3,7 @@ use crate::infrastructure::serial::client::{SerialClient, SerialMessage};
 use std::collections::HashMap;
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 pub type SessionId = String;
 
@@ -26,6 +26,7 @@ pub enum SessionStatus {
 pub struct SessionHandle {
     client: SerialClient,
     info: SessionInfo,
+    #[allow(dead_code)]
     message_sender: mpsc::UnboundedSender<SerialMessage>,
 }
 

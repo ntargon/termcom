@@ -1,12 +1,11 @@
 use crate::core::{
-    communication::{CommunicationEngine, Message, MessagePattern, MessageType},
+    communication::{CommunicationEngine, Message, MessagePattern},
     session::state::{SessionState, SessionActivity, SessionStatus, ActivityType},
 };
 use crate::domain::{config::DeviceConfig, error::{TermComError, TermComResult}};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
 

@@ -1,5 +1,4 @@
 use ratatui::{
-    backend::Backend,
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},

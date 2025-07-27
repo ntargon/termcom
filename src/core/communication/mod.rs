@@ -4,5 +4,5 @@ pub mod message;
 pub mod transport;
 
 pub use engine::CommunicationEngine;
-pub use message::{Message, MessageType, MessageMetadata, MessagePattern};
-pub use transport::{Transport, TransportType};
+pub use message::{Message, MessagePattern};
+pub use transport::TransportType;

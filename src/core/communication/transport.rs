@@ -247,7 +247,7 @@ mod tests {
             self.transport_type.clone()
         }
         
-        async fn create_session(&self, device_config: &DeviceConfig) -> TermComResult<String> {
+        async fn create_session(&self, _device_config: &DeviceConfig) -> TermComResult<String> {
             let session_id = format!("{}_{}", self.transport_type, uuid::Uuid::new_v4().simple());
             Ok(session_id)
         }
