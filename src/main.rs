@@ -5,17 +5,20 @@ mod core;
 mod domain;
 mod infrastructure;
 
-use domain::error::TermComResult;
-use infrastructure::logging;
+use clap::Parser;
+use cli::args::Args;
+use cli::commands::execute_command;
+use domain::error::TermComError;
 
-fn main() -> TermComResult<()> {
-    // Initialize logging system
-    logging::init_logging().map_err(|e| domain::error::TermComError::Config { 
-        message: format!("Failed to initialize logging: {}", e) 
-    })?;
+#[tokio::main]
+async fn main() -> Result<(), TermComError> {
+    let args = Args::parse();
     
-    logging::info!("TermCom - Embedded Device Communication Debug Tool");
-    logging::info!("Version: {}", env!("CARGO_PKG_VERSION"));
-    
-    Ok(())
+    match execute_command(args).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
 }

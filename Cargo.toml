@@ -42,6 +42,16 @@ uuid = { version = "1.0", features = ["v4"] }
 # Async traits
 async-trait = "0.1"
 
+# Data encoding/decoding
+hex = "0.4"
+base64 = "0.21"
+
+# Table formatting
+tabled = "0.14"
+
+# JSON serialization
+serde_json = "1.0"
+
 # Testing
 proptest = { version = "1.0", optional = true }
 

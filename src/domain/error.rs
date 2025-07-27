@@ -29,6 +29,15 @@ pub enum TermComError {
     
     #[error("Communication error: {message}")]
     Communication { message: String },
+    
+    #[error("Configuration error: {0}")]
+    Configuration(String),
+    
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+    
+    #[error("Output error: {0}")]
+    Output(String),
 }
 
 pub type TermComResult<T> = Result<T, TermComError>;
