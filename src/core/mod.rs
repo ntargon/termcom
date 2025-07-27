@@ -2,3 +2,4 @@
 pub mod communication;
 pub mod session;
 pub mod config;
+pub mod memory;

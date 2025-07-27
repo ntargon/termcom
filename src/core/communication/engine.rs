@@ -5,10 +5,10 @@ use crate::core::communication::{
 use crate::domain::{config::DeviceConfig, error::{TermComError, TermComResult}};
 use crate::infrastructure::{serial::SerialManager, tcp::TcpManager};
 use std::collections::VecDeque;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, Instant};
 use tokio::sync::{mpsc, RwLock};
-use std::sync::Arc;
-use tracing::{debug, error, info};
+use std::sync::{Arc, atomic::{AtomicUsize, AtomicU64, Ordering}};
+use tracing::{debug, error, info, warn};
 
 /// Central communication engine that manages all transport types
 pub struct CommunicationEngine {
@@ -16,9 +16,17 @@ pub struct CommunicationEngine {
     message_history: Arc<RwLock<VecDeque<Message>>>,
     message_sender: mpsc::UnboundedSender<Message>,
     message_receiver: Arc<RwLock<mpsc::UnboundedReceiver<Message>>>,
-    sequence_counter: Arc<RwLock<u64>>,
+    sequence_counter: Arc<AtomicU64>,
     max_history_size: usize,
     running: Arc<RwLock<bool>>,
+    start_time: Arc<RwLock<Option<Instant>>>,
+    // Performance metrics
+    total_bytes_sent: Arc<AtomicU64>,
+    total_bytes_received: Arc<AtomicU64>,
+    message_count: Arc<AtomicUsize>,
+    // Memory optimization
+    last_cleanup: Arc<RwLock<Instant>>,
+    cleanup_interval: Duration,
 }
 
 impl CommunicationEngine {
@@ -34,12 +42,18 @@ impl CommunicationEngine {
         
         Self {
             registry: Arc::new(RwLock::new(registry)),
-            message_history: Arc::new(RwLock::new(VecDeque::new())),
+            message_history: Arc::new(RwLock::new(VecDeque::with_capacity(max_history_size))),
             message_sender,
             message_receiver: Arc::new(RwLock::new(message_receiver)),
-            sequence_counter: Arc::new(RwLock::new(0)),
+            sequence_counter: Arc::new(AtomicU64::new(0)),
             max_history_size,
             running: Arc::new(RwLock::new(false)),
+            start_time: Arc::new(RwLock::new(None)),
+            total_bytes_sent: Arc::new(AtomicU64::new(0)),
+            total_bytes_received: Arc::new(AtomicU64::new(0)),
+            message_count: Arc::new(AtomicUsize::new(0)),
+            last_cleanup: Arc::new(RwLock::new(Instant::now())),
+            cleanup_interval: Duration::from_secs(300), // 5 minutes
         }
     }
     
@@ -54,10 +68,19 @@ impl CommunicationEngine {
         *running = true;
         drop(running);
         
+        // Set start time
+        {
+            let mut start_time = self.start_time.write().await;
+            *start_time = Some(Instant::now());
+        }
+        
         info!("Communication engine started");
         
         // Start message processing task
         self.start_message_processor().await;
+        
+        // Start periodic cleanup task
+        self.start_cleanup_task().await;
         
         Ok(())
     }
@@ -136,6 +159,9 @@ impl CommunicationEngine {
         // Send data
         registry.send_data(session_id, data.clone()).await?;
         
+        // Update statistics
+        self.total_bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
+        
         // Create and store message
         let mut message = Message::sent(
             session_id.to_string(),
@@ -145,7 +171,7 @@ impl CommunicationEngine {
         );
         
         // Set sequence number
-        let sequence = self.next_sequence().await;
+        let sequence = self.next_sequence();
         message.set_sequence(sequence);
         
         self.add_message_to_history(message).await;
@@ -165,7 +191,11 @@ impl CommunicationEngine {
             })?;
         
         // Send command
-        registry.send_data(session_id, command.as_bytes().to_vec()).await?;
+        let command_bytes = command.as_bytes().to_vec();
+        registry.send_data(session_id, command_bytes.clone()).await?;
+        
+        // Update statistics
+        self.total_bytes_sent.fetch_add(command_bytes.len() as u64, Ordering::Relaxed);
         
         // Create and store message
         let mut message = Message::command(
@@ -176,7 +206,7 @@ impl CommunicationEngine {
         );
         
         // Set sequence number
-        let sequence = self.next_sequence().await;
+        let sequence = self.next_sequence();
         message.set_sequence(sequence);
         
         self.add_message_to_history(message).await;
@@ -228,25 +258,28 @@ impl CommunicationEngine {
     
     /// Get statistics
     pub async fn get_statistics(&self) -> CommunicationStats {
-        let history = self.message_history.read().await;
         let sessions = self.list_sessions().await;
         
-        let total_messages = history.len();
-        let sent_messages = history.iter().filter(|m| matches!(m.message_type, MessageType::Sent)).count();
-        let received_messages = history.iter().filter(|m| matches!(m.message_type, MessageType::Received)).count();
-        let error_messages = history.iter().filter(|m| matches!(m.message_type, MessageType::Error)).count();
+        // Use atomic counters for performance metrics
+        let total_bytes_sent = self.total_bytes_sent.load(Ordering::Relaxed);
+        let total_bytes_received = self.total_bytes_received.load(Ordering::Relaxed);
+        let total_messages = self.message_count.load(Ordering::Relaxed);
         
-        let total_bytes_sent: usize = history
-            .iter()
-            .filter(|m| matches!(m.message_type, MessageType::Sent))
-            .map(|m| m.data.len())
-            .sum();
+        // Calculate uptime efficiently
+        let uptime = if let Some(start) = *self.start_time.read().await {
+            start.elapsed()
+        } else {
+            Duration::default()
+        };
         
-        let total_bytes_received: usize = history
-            .iter()
-            .filter(|m| matches!(m.message_type, MessageType::Received))
-            .map(|m| m.data.len())
-            .sum();
+        // For detailed message counts, only read history if needed
+        let (sent_messages, received_messages, error_messages) = {
+            let history = self.message_history.read().await;
+            let sent = history.iter().filter(|m| matches!(m.message_type, MessageType::Sent)).count();
+            let received = history.iter().filter(|m| matches!(m.message_type, MessageType::Received)).count();
+            let error = history.iter().filter(|m| matches!(m.message_type, MessageType::Error)).count();
+            (sent, received, error)
+        };
         
         CommunicationStats {
             total_sessions: sessions.len(),
@@ -255,9 +288,9 @@ impl CommunicationEngine {
             sent_messages,
             received_messages,
             error_messages,
-            total_bytes_sent,
-            total_bytes_received,
-            uptime: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default(),
+            total_bytes_sent: total_bytes_sent as usize,
+            total_bytes_received: total_bytes_received as usize,
+            uptime,
         }
     }
     
@@ -271,6 +304,7 @@ impl CommunicationEngine {
     async fn start_message_processor(&self) {
         let message_receiver = Arc::clone(&self.message_receiver);
         let message_history = Arc::clone(&self.message_history);
+        let message_count = Arc::clone(&self.message_count);
         let max_history_size = self.max_history_size;
         let running = Arc::clone(&self.running);
         
@@ -284,10 +318,16 @@ impl CommunicationEngine {
                     // Add message to history
                     history.push_back(message);
                     
+                    // Update total message count
+                    message_count.fetch_add(1, Ordering::Relaxed);
+                    
                     // Trim history if needed
                     while history.len() > max_history_size {
                         history.pop_front();
                     }
+                    
+                    // Release lock early for better concurrency
+                    drop(history);
                 }
             }
         });
@@ -299,10 +339,82 @@ impl CommunicationEngine {
         }
     }
     
-    async fn next_sequence(&self) -> u64 {
-        let mut counter = self.sequence_counter.write().await;
-        *counter += 1;
-        *counter
+    fn next_sequence(&self) -> u64 {
+        self.sequence_counter.fetch_add(1, Ordering::Relaxed)
+    }
+    
+    /// Trigger periodic cleanup of old messages and optimize memory usage
+    pub async fn cleanup_old_data(&self) {
+        let mut last_cleanup = self.last_cleanup.write().await;
+        let now = Instant::now();
+        
+        if now.duration_since(*last_cleanup) > self.cleanup_interval {
+            *last_cleanup = now;
+            drop(last_cleanup);
+            
+            let mut history = self.message_history.write().await;
+            let initial_size = history.len();
+            
+            // Keep only the most recent messages, but ensure we don't exceed max size
+            if history.len() > self.max_history_size {
+                let excess = history.len() - self.max_history_size;
+                for _ in 0..excess {
+                    history.pop_front();
+                }
+            }
+            
+            // Shrink the VecDeque to save memory if it's significantly oversized
+            if history.capacity() > self.max_history_size * 2 {
+                history.shrink_to_fit();
+            }
+            
+            let final_size = history.len();
+            if initial_size != final_size {
+                info!("Cleaned up message history: {} -> {} messages", initial_size, final_size);
+            }
+        }
+    }
+    
+    /// Get memory usage information
+    pub async fn get_memory_info(&self) -> MemoryInfo {
+        let history = self.message_history.read().await;
+        let message_count = history.len();
+        let capacity = history.capacity();
+        
+        // Estimate memory usage (approximate)
+        let estimated_bytes = message_count * std::mem::size_of::<Message>() + 
+                            capacity * std::mem::size_of::<Message>();
+        
+        MemoryInfo {
+            message_count,
+            message_capacity: capacity,
+            estimated_memory_bytes: estimated_bytes,
+            max_history_size: self.max_history_size,
+        }
+    }
+    
+    async fn start_cleanup_task(&self) {
+        let engine_ref = Arc::new(self.clone_for_cleanup());
+        let cleanup_interval = self.cleanup_interval;
+        let running = Arc::clone(&self.running);
+        
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(cleanup_interval);
+            
+            while *running.read().await {
+                interval.tick().await;
+                engine_ref.cleanup_old_data().await;
+            }
+        });
+    }
+    
+    fn clone_for_cleanup(&self) -> CommunicationEngineRef {
+        CommunicationEngineRef {
+            message_history: Arc::clone(&self.message_history),
+            last_cleanup: Arc::clone(&self.last_cleanup),
+            max_history_size: self.max_history_size,
+            cleanup_interval: self.cleanup_interval,
+        }
     }
 }
 
@@ -318,6 +430,56 @@ pub struct CommunicationStats {
     pub total_bytes_sent: usize,
     pub total_bytes_received: usize,
     pub uptime: Duration,
+}
+
+/// Memory usage information
+#[derive(Debug, Clone)]
+pub struct MemoryInfo {
+    pub message_count: usize,
+    pub message_capacity: usize,
+    pub estimated_memory_bytes: usize,
+    pub max_history_size: usize,
+}
+
+/// Lightweight reference for cleanup tasks
+struct CommunicationEngineRef {
+    message_history: Arc<RwLock<VecDeque<Message>>>,
+    last_cleanup: Arc<RwLock<Instant>>,
+    max_history_size: usize,
+    cleanup_interval: Duration,
+}
+
+impl CommunicationEngineRef {
+    async fn cleanup_old_data(&self) {
+        let mut last_cleanup = self.last_cleanup.write().await;
+        let now = Instant::now();
+        
+        if now.duration_since(*last_cleanup) > self.cleanup_interval {
+            *last_cleanup = now;
+            drop(last_cleanup);
+            
+            let mut history = self.message_history.write().await;
+            let initial_size = history.len();
+            
+            // Keep only the most recent messages
+            if history.len() > self.max_history_size {
+                let excess = history.len() - self.max_history_size;
+                for _ in 0..excess {
+                    history.pop_front();
+                }
+            }
+            
+            // Shrink capacity if oversized
+            if history.capacity() > self.max_history_size * 2 {
+                history.shrink_to_fit();
+            }
+            
+            let final_size = history.len();
+            if initial_size != final_size {
+                info!("Cleaned up message history: {} -> {} messages", initial_size, final_size);
+            }
+        }
+    }
 }
 
 // Transport adapters to integrate with existing infrastructure
