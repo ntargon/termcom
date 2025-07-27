@@ -26,6 +26,9 @@ pub enum TermComError {
     
     #[error("Protocol error: {0}")]
     Protocol(String),
+    
+    #[error("Communication error: {message}")]
+    Communication { message: String },
 }
 
 pub type TermComResult<T> = Result<T, TermComError>;
