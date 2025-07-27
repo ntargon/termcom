@@ -6,3 +6,6 @@ pub mod state;
 pub use manager::{SessionManager, SessionFilter, SessionSummary, GlobalStatistics};
 pub use session::{Session, SessionConfig, SessionType};
 pub use state::{SessionState, SessionActivity, SessionStatus};
+
+/// Session ID type alias
+pub type SessionId = String;

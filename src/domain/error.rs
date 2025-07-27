@@ -38,6 +38,9 @@ pub enum TermComError {
     
     #[error("Output error: {0}")]
     Output(String),
+    
+    #[error("TUI error: {0}")]
+    TuiError(String),
 }
 
 pub type TermComResult<T> = Result<T, TermComError>;

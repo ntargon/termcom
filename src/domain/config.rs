@@ -187,6 +187,52 @@ impl Default for FlowControlConfig {
     }
 }
 
+/// Serial connection configuration type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerialConfig {
+    pub port: String,
+    pub baud_rate: u32,
+    pub data_bits: u8,
+    pub stop_bits: u8,
+    pub parity: ParityConfig,
+    pub flow_control: FlowControlConfig,
+    pub timeout: std::time::Duration,
+}
+
+/// TCP connection configuration type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TcpConfig {
+    pub host: String,
+    pub port: u16,
+    pub timeout: std::time::Duration,
+    pub keep_alive: bool,
+    pub no_delay: bool,
+}
+
+impl From<SerialConfig> for ConnectionConfig {
+    fn from(config: SerialConfig) -> Self {
+        ConnectionConfig::Serial {
+            port: config.port,
+            baud_rate: config.baud_rate,
+            data_bits: config.data_bits,
+            stop_bits: config.stop_bits,
+            parity: config.parity,
+            flow_control: config.flow_control,
+        }
+    }
+}
+
+impl From<TcpConfig> for ConnectionConfig {
+    fn from(config: TcpConfig) -> Self {
+        ConnectionConfig::Tcp {
+            host: config.host,
+            port: config.port,
+            timeout_ms: config.timeout.as_millis() as u64,
+            keep_alive: config.keep_alive,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
