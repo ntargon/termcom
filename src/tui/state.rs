@@ -3,8 +3,8 @@ use std::time::SystemTime;
 use uuid::Uuid;
 
 use crate::{
-    core::session::{SessionId, SessionType},
-    domain::error::TermComError,
+    core::session::{SessionId, SessionType, SessionManager, SessionConfig},
+    domain::{error::TermComError, config::{DeviceConfig, ConnectionConfig}},
 };
 
 use super::{ui::ActivePanel, widgets::chat::ChatMessage};
@@ -46,22 +46,49 @@ impl AppState {
         }
     }
 
-    pub async fn create_serial_session(&mut self, port: String, baud_rate: u32) -> Result<SessionId, TermComError> {
-        let session_id = Uuid::new_v4().to_string();
-        let name = format!("Serial {}", port);
-        let config_info = format!("Port: {}, Baud: {}", port, baud_rate);
+    pub async fn create_serial_session(&mut self, session_manager: &SessionManager, port: String, baud_rate: u32) -> Result<SessionId, TermComError> {
+        // Create device config for serial connection
+        let device_config = DeviceConfig {
+            name: format!("Serial {}", port),
+            description: format!("Serial connection on {} at {} baud", port, baud_rate),
+            connection: ConnectionConfig::Serial {
+                port: port.clone(),
+                baud_rate,
+                data_bits: 8,
+                stop_bits: 1,
+                parity: crate::domain::config::ParityConfig::None,
+                flow_control: crate::domain::config::FlowControlConfig::None,
+            },
+            commands: Vec::new(),
+        };
+
+        // Create session config
+        let session_config = SessionConfig {
+            name: format!("Serial {}", port),
+            session_type: SessionType::Interactive,
+            device_config,
+            auto_reconnect: true,
+            max_reconnect_attempts: 3,
+            reconnect_delay_ms: 1000,
+            timeout_ms: 5000,
+            max_history_size: 1000,
+            log_activities: true,
+            tags: vec!["serial".to_string()],
+            properties: std::collections::HashMap::new(),
+        };
+
+        // Create session using the real session manager
+        let session_id = session_manager.create_session(session_config).await?;
         
-        // TODO: Implement actual serial connection
-        // For now, just create a mock session
-        
+        // Create TUI session state for tracking
         let session_state = SessionState {
             id: session_id.clone(),
-            name,
+            name: format!("Serial {}", port),
             session_type: SessionType::Interactive,
             messages: Vec::new(),
             connected: true,
             last_activity: SystemTime::now(),
-            config_info,
+            config_info: format!("Port: {}, Baud: {}", port, baud_rate),
         };
 
         self.sessions.insert(session_id.clone(), session_state);
@@ -71,22 +98,47 @@ impl AppState {
         Ok(session_id)
     }
 
-    pub async fn create_tcp_session(&mut self, host: String, port: u16) -> Result<SessionId, TermComError> {
-        let session_id = Uuid::new_v4().to_string();
-        let name = format!("TCP {}:{}", host, port);
-        let config_info = format!("Host: {}, Port: {}", host, port);
+    pub async fn create_tcp_session(&mut self, session_manager: &SessionManager, host: String, port: u16) -> Result<SessionId, TermComError> {
+        // Create device config for TCP connection
+        let device_config = DeviceConfig {
+            name: format!("TCP {}:{}", host, port),
+            description: format!("TCP connection to {}:{}", host, port),
+            connection: ConnectionConfig::Tcp {
+                host: host.clone(),
+                port,
+                timeout_ms: 3000,
+                keep_alive: true,
+            },
+            commands: Vec::new(),
+        };
+
+        // Create session config
+        let session_config = SessionConfig {
+            name: format!("TCP {}:{}", host, port),
+            session_type: SessionType::Interactive,
+            device_config,
+            auto_reconnect: true,
+            max_reconnect_attempts: 3,
+            reconnect_delay_ms: 1000,
+            timeout_ms: 5000,
+            max_history_size: 1000,
+            log_activities: true,
+            tags: vec!["tcp".to_string()],
+            properties: std::collections::HashMap::new(),
+        };
+
+        // Create session using the real session manager
+        let session_id = session_manager.create_session(session_config).await?;
         
-        // TODO: Implement actual TCP connection
-        // For now, just create a mock session
-        
+        // Create TUI session state for tracking
         let session_state = SessionState {
             id: session_id.clone(),
-            name,
+            name: format!("TCP {}:{}", host, port),
             session_type: SessionType::Interactive,
             messages: Vec::new(),
             connected: true,
             last_activity: SystemTime::now(),
-            config_info,
+            config_info: format!("Host: {}, Port: {}", host, port),
         };
 
         self.sessions.insert(session_id.clone(), session_state);

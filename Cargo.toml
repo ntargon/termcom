@@ -9,6 +9,14 @@ repository = "https://github.com/your-org/termcom"
 keywords = ["embedded", "serial", "tcp", "debug", "communication"]
 categories = ["command-line-utilities", "development-tools"]
 
+[[bin]]
+name = "termcom"
+path = "src/main.rs"
+
+[lib]
+name = "termcom"
+path = "src/lib.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

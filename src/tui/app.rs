@@ -11,12 +11,19 @@ use ratatui::{
     Terminal,
 };
 
-use crate::domain::error::TermComError;
+use crate::{
+    domain::error::TermComError,
+    core::{
+        communication::CommunicationEngine,
+        session::SessionManager,
+    },
+};
 use super::{
     event::{AppEvent, EventHandler},
     state::AppState,
     ui::{draw_ui, ActivePanel},
 };
+use std::sync::Arc;
 
 pub struct App {
     state: AppState,
@@ -25,6 +32,8 @@ pub struct App {
     should_quit: bool,
     last_tick: Instant,
     tick_rate: Duration,
+    session_manager: Arc<SessionManager>,
+    communication_engine: Arc<CommunicationEngine>,
 }
 
 impl App {
@@ -38,6 +47,10 @@ impl App {
         let terminal = Terminal::new(backend)
             .map_err(|e| TermComError::TuiError(e.to_string()))?;
 
+        // Initialize communication engine and session manager
+        let communication_engine = Arc::new(CommunicationEngine::new(1000, 10));
+        let session_manager = Arc::new(SessionManager::new(Arc::clone(&communication_engine), 10));
+
         let state = AppState::new();
         let event_handler = EventHandler::new();
 
@@ -48,10 +61,15 @@ impl App {
             should_quit: false,
             last_tick: Instant::now(),
             tick_rate: Duration::from_millis(250),
+            session_manager,
+            communication_engine,
         })
     }
 
     pub async fn run(&mut self) -> Result<(), TermComError> {
+        // Start the communication engine
+        self.communication_engine.start().await?;
+        
         loop {
             // Handle events
             if let Ok(true) = event::poll(self.tick_rate) {
@@ -136,10 +154,10 @@ impl App {
                 }
             }
             AppEvent::ConnectSerial { port, baud_rate } => {
-                self.state.create_serial_session(port, baud_rate).await?;
+                self.state.create_serial_session(&self.session_manager, port, baud_rate).await?;
             }
             AppEvent::ConnectTcp { host, port } => {
-                self.state.create_tcp_session(host, port).await?;
+                self.state.create_tcp_session(&self.session_manager, host, port).await?;
             }
             AppEvent::SelectSession(session_id) => {
                 self.state.selected_session = Some(session_id);
