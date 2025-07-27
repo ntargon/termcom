@@ -44,6 +44,8 @@ pub enum Command {
     Config(ConfigArgs),
     /// Interactive TUI mode
     Tui,
+    /// Echo server for testing
+    EchoServer(EchoServerArgs),
     /// Display version information
     Version,
 }
@@ -115,6 +117,26 @@ pub struct ConfigArgs {
     /// Configuration subcommand
     #[command(subcommand)]
     pub command: ConfigCommand,
+}
+
+/// Echo server arguments
+#[derive(ClapArgs, Debug)]
+pub struct EchoServerArgs {
+    /// Bind address
+    #[arg(short, long, default_value = "127.0.0.1")]
+    pub bind: String,
+
+    /// Port number
+    #[arg(short, long, default_value = "8080")]
+    pub port: u16,
+
+    /// Enable verbose logging
+    #[arg(short, long)]
+    pub verbose: bool,
+
+    /// Echo server subcommand
+    #[command(subcommand)]
+    pub command: EchoServerCommand,
 }
 
 /// Serial communication subcommands
@@ -203,6 +225,33 @@ pub enum TcpCommand {
         /// Output file for logging
         #[arg(short, long)]
         output: Option<String>,
+    },
+}
+
+/// Echo server subcommands
+#[derive(Subcommand, Debug)]
+pub enum EchoServerCommand {
+    /// Start echo server
+    Start {
+        /// Run in background (daemon mode)
+        #[arg(short, long)]
+        daemon: bool,
+        /// Log file path for daemon mode
+        #[arg(short, long)]
+        log_file: Option<String>,
+    },
+    /// Stop running echo server
+    Stop,
+    /// Show echo server status
+    Status,
+    /// Monitor echo server activity
+    Monitor {
+        /// Output file for logging
+        #[arg(short, long)]
+        output: Option<String>,
+        /// Show client connections
+        #[arg(short, long)]
+        clients: bool,
     },
 }
 

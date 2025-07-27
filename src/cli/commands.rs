@@ -1,5 +1,5 @@
 use crate::cli::args::{
-    Args, Command, ConfigCommand, DataFormat, SerialCommand, SessionCommand, TcpCommand,
+    Args, Command, ConfigCommand, DataFormat, EchoServerCommand, SerialCommand, SessionCommand, TcpCommand,
 };
 use crate::cli::output::{ConsoleWriter, OutputWriter};
 use crate::core::communication::CommunicationEngine;
@@ -50,6 +50,9 @@ pub async fn execute_command(args: Args) -> Result<(), TermComError> {
         Command::Tui => {
             writer.write_message("TUI mode not implemented yet")?;
             Ok(())
+        }
+        Command::EchoServer(echo_args) => {
+            execute_echo_server_command(echo_args, &writer).await
         }
         Command::Version => {
             writer.write_message(&format!("termcom {}", env!("CARGO_PKG_VERSION")))?;
@@ -430,5 +433,135 @@ fn setup_logging(config: &crate::domain::config::GlobalConfig, verbose: bool) ->
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|e| TermComError::Configuration(format!("Failed to initialize logging: {}", e)))?;
         
+    Ok(())
+}
+
+async fn execute_echo_server_command(
+    args: crate::cli::args::EchoServerArgs,
+    writer: &ConsoleWriter,
+) -> Result<(), TermComError> {
+    use crate::infrastructure::tcp::EchoServer;
+    
+    let bind_addr = format!("{}:{}", args.bind, args.port);
+    
+    match args.command {
+        EchoServerCommand::Start { daemon, log_file: _ } => {
+            if daemon {
+                writer.write_message("Daemon mode not implemented yet")?;
+                return Ok(());
+            }
+            
+            writer.write_message(&format!("Starting echo server on {}", bind_addr))?;
+            
+            let mut server = EchoServer::new(&bind_addr).await
+                .map_err(|e| TermComError::Communication { 
+                    message: format!("Failed to create echo server: {}", e) 
+                })?;
+            
+            let actual_addr = server.get_bind_addr();
+            server.start().await
+                .map_err(|e| TermComError::Communication { 
+                    message: format!("Failed to start echo server: {}", e) 
+                })?;
+            
+            writer.write_message(&format!("Echo server started successfully on {}", actual_addr))?;
+            writer.write_message("Press Ctrl+C to stop the server")?;
+            
+            // Install signal handler for graceful shutdown
+            use tokio::signal;
+            
+            tokio::select! {
+                _ = signal::ctrl_c() => {
+                    writer.write_message("\nReceived Ctrl+C, shutting down...")?;
+                }
+            }
+            
+            server.stop().await
+                .map_err(|e| TermComError::Communication { 
+                    message: format!("Failed to stop echo server: {}", e) 
+                })?;
+            
+            writer.write_message("Echo server stopped")?;
+        }
+        
+        EchoServerCommand::Stop => {
+            writer.write_message("Server management not implemented yet")?;
+            writer.write_message("Use Ctrl+C to stop a running server")?;
+        }
+        
+        EchoServerCommand::Status => {
+            writer.write_message("Server status checking not implemented yet")?;
+        }
+        
+        EchoServerCommand::Monitor { output, clients } => {
+            writer.write_message(&format!("Starting echo server monitor on {}", bind_addr))?;
+            
+            let mut server = EchoServer::new(&bind_addr).await
+                .map_err(|e| TermComError::Communication { 
+                    message: format!("Failed to create echo server: {}", e) 
+                })?;
+            
+            let actual_addr = server.get_bind_addr();
+            server.start().await
+                .map_err(|e| TermComError::Communication { 
+                    message: format!("Failed to start echo server: {}", e) 
+                })?;
+            
+            writer.write_message(&format!("Echo server monitoring started on {}", actual_addr))?;
+            writer.write_message("Press Ctrl+C to stop monitoring")?;
+            
+            use tokio::signal;
+            use std::time::Duration;
+            
+            loop {
+                tokio::select! {
+                    // Handle messages
+                    message = server.receive_message() => {
+                        if let Some(msg) = message {
+                            let timestamp = msg.timestamp
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            
+                            let data_str = String::from_utf8_lossy(&msg.data);
+                            writer.write_message(&format!(
+                                "[{}] {} -> {}", 
+                                timestamp, 
+                                msg.client_addr, 
+                                data_str
+                            ))?;
+                            
+                            if let Some(output_file) = &output {
+                                // TODO: Implement file logging
+                                let _ = output_file;
+                            }
+                        }
+                    }
+                    
+                    // Show client status periodically
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                        if clients {
+                            let client_count = server.get_client_count().await;
+                            writer.write_message(&format!("Connected clients: {}", client_count))?;
+                        }
+                    }
+                    
+                    // Handle Ctrl+C
+                    _ = signal::ctrl_c() => {
+                        writer.write_message("\nReceived Ctrl+C, stopping monitor...")?;
+                        break;
+                    }
+                }
+            }
+            
+            server.stop().await
+                .map_err(|e| TermComError::Communication { 
+                    message: format!("Failed to stop echo server: {}", e) 
+                })?;
+            
+            writer.write_message("Echo server monitor stopped")?;
+        }
+    }
+    
     Ok(())
 }

@@ -1,5 +1,6 @@
 use crate::domain::{config::DeviceConfig, error::{TermComError, TermComResult}};
 use crate::infrastructure::tcp::client::{TcpClient, TcpMessage};
+use crate::infrastructure::tcp::server::{EchoServer, ServerMessage};
 use std::collections::HashMap;
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
@@ -37,6 +38,7 @@ pub struct TcpManager {
     max_sessions: usize,
     message_receiver: mpsc::UnboundedReceiver<TcpMessage>,
     message_sender: mpsc::UnboundedSender<TcpMessage>,
+    echo_server: Option<EchoServer>,
 }
 
 impl TcpManager {
@@ -48,6 +50,7 @@ impl TcpManager {
             max_sessions,
             message_receiver,
             message_sender,
+            echo_server: None,
         }
     }
     
@@ -219,6 +222,64 @@ impl TcpManager {
             Err(TermComError::Communication {
                 message: format!("Session '{}' not found", session_id),
             })
+        }
+    }
+    
+    // Echo server methods
+    pub async fn start_echo_server(&mut self, bind_addr: &str) -> TermComResult<std::net::SocketAddr> {
+        if self.echo_server.is_some() {
+            return Err(TermComError::Communication {
+                message: "Echo server is already running".to_string(),
+            });
+        }
+        
+        let mut server = EchoServer::new(bind_addr).await?;
+        let actual_addr = server.get_bind_addr();
+        server.start().await?;
+        
+        self.echo_server = Some(server);
+        
+        info!("Echo server started on {}", actual_addr);
+        Ok(actual_addr)
+    }
+    
+    pub async fn stop_echo_server(&mut self) -> TermComResult<()> {
+        if let Some(mut server) = self.echo_server.take() {
+            server.stop().await?;
+            info!("Echo server stopped");
+            Ok(())
+        } else {
+            Err(TermComError::Communication {
+                message: "Echo server is not running".to_string(),
+            })
+        }
+    }
+    
+    pub fn is_echo_server_running(&self) -> bool {
+        self.echo_server.as_ref().map_or(false, |s| s.is_running())
+    }
+    
+    pub async fn get_echo_server_stats(&self) -> Option<crate::infrastructure::tcp::server::ServerStats> {
+        if let Some(server) = &self.echo_server {
+            Some(server.get_server_stats().await)
+        } else {
+            None
+        }
+    }
+    
+    pub async fn get_echo_server_clients(&self) -> Vec<crate::infrastructure::tcp::server::ClientConnection> {
+        if let Some(server) = &self.echo_server {
+            server.get_connected_clients().await
+        } else {
+            Vec::new()
+        }
+    }
+    
+    pub async fn receive_server_message(&mut self) -> Option<ServerMessage> {
+        if let Some(server) = &mut self.echo_server {
+            server.receive_message().await
+        } else {
+            None
         }
     }
 }
