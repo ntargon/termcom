@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["TermCom Development Team"]
 description = "Embedded device communication debug tool with serial and TCP support"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/your-org/termcom"
+repository = "https://github.com/ntargon/termcom"
 keywords = ["embedded", "serial", "tcp", "debug", "communication"]
 categories = ["command-line-utilities", "development-tools"]
 
@@ -24,7 +24,7 @@ tokio = { version = "1.0", features = ["full"] }
 # CLI framework
 clap = { version = "4.0", features = ["derive"] }
 
-# TUI framework  
+# TUI framework
 ratatui = "0.24"
 crossterm = "0.27"
 
