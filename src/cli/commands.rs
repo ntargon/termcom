@@ -2,15 +2,15 @@ use crate::cli::args::{
     Args, Command, ConfigCommand, DataFormat, SerialCommand, SessionCommand, TcpCommand,
 };
 use crate::cli::output::{ConsoleWriter, OutputWriter};
-use crate::core::communication::{CommunicationEngine, TransportType};
+use crate::core::communication::CommunicationEngine;
 use crate::core::session::{SessionManager, SessionFilter, SessionType};
 use crate::domain::config::{
     DeviceConfig, TermComConfig, ConnectionConfig,
 };
 use crate::domain::error::TermComError;
+use crate::infrastructure::config::ConfigManager;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -18,8 +18,13 @@ use uuid::Uuid;
 pub async fn execute_command(args: Args) -> Result<(), TermComError> {
     let writer = ConsoleWriter::new(args.output.clone());
     
-    // Load configuration
-    let config = load_config(args.config.as_deref()).await?;
+    // Load configuration using ConfigManager
+    let config_manager = ConfigManager::new()?;
+    let config = if let Some(config_path) = &args.config {
+        config_manager.load_config_from_path(config_path.as_ref())?
+    } else {
+        config_manager.load_config()?
+    };
     
     // Initialize logging
     if !args.quiet {
@@ -41,7 +46,7 @@ pub async fn execute_command(args: Args) -> Result<(), TermComError> {
             execute_session_command(session_args, &writer, &session_manager).await
         }
         Command::Config(config_args) => {
-            execute_config_command(config_args, &writer, &config).await
+            execute_config_command(config_args, &writer, &config, &config_manager).await
         }
         Command::Tui => {
             writer.write_message("TUI mode not implemented yet")?;
@@ -334,6 +339,7 @@ async fn execute_config_command(
     args: crate::cli::args::ConfigArgs,
     writer: &ConsoleWriter,
     config: &TermComConfig,
+    config_manager: &ConfigManager,
 ) -> Result<(), TermComError> {
     match args.command {
         ConfigCommand::Show => {
@@ -341,31 +347,43 @@ async fn execute_config_command(
             Ok(())
         }
         ConfigCommand::Validate { file } => {
-            let config_path = file.unwrap_or_else(|| "termcom.toml".to_string());
-            match load_config_from_file(&config_path).await {
-                Ok(_) => writer.write_message(&format!("Configuration file '{}' is valid", config_path))?,
-                Err(e) => writer.write_error(&format!("Configuration validation failed: {}", e))?,
+            if let Some(config_path) = file {
+                match config_manager.load_config_from_path(config_path.as_ref()) {
+                    Ok(_) => writer.write_message(&format!("Configuration file '{}' is valid", config_path))?,
+                    Err(e) => writer.write_error(&format!("Configuration validation failed: {}", e))?,
+                }
+            } else {
+                match config_manager.load_config() {
+                    Ok(_) => writer.write_message("Current configuration is valid")?,
+                    Err(e) => writer.write_error(&format!("Configuration validation failed: {}", e))?,
+                }
             }
             Ok(())
         }
         ConfigCommand::Init { output, global } => {
-            let config_path = if global {
-                get_global_config_path()?
+            if global {
+                let global_path = config_manager.get_global_config_path_ref();
+                let default_config = TermComConfig::default();
+                config_manager.save_config_to_path(global_path, &default_config)?;
+                writer.write_message(&format!("Global configuration initialized at '{}'", global_path.display()))?;
+            } else if let Some(output_path) = output {
+                config_manager.init_project_config(output_path.as_ref())?;
+                writer.write_message(&format!("Project configuration initialized at '{}'", output_path))?;
             } else {
-                output.unwrap_or_else(|| "termcom.toml".to_string())
-            };
-            
-            let default_config = TermComConfig::default();
-            save_config_to_file(&default_config, &config_path).await?;
-            writer.write_message(&format!("Default configuration saved to '{}'", config_path))?;
+                let current_dir = std::env::current_dir()
+                    .map_err(|e| TermComError::Config { message: format!("Failed to get current directory: {}", e) })?;
+                config_manager.init_project_config(&current_dir)?;
+                writer.write_message("Project configuration initialized in current directory")?;
+            }
             Ok(())
         }
         ConfigCommand::Devices => {
             writer.write_devices(&config.devices)?;
             Ok(())
         }
-        ConfigCommand::AddDevice { name: _, description: _, connection: _ } => {
-            writer.write_message("Add device command not implemented yet")?;
+        ConfigCommand::AddDevice { name, description, connection } => {
+            writer.write_message(&format!("Adding device '{}' with {:?} connection", name, connection))?;
+            writer.write_message("Device addition to configuration not fully implemented yet")?;
             Ok(())
         }
     }
@@ -387,52 +405,6 @@ fn parse_data(data: &str, format: DataFormat) -> Result<Vec<u8>, TermComError> {
     }
 }
 
-async fn load_config(config_path: Option<&str>) -> Result<TermComConfig, TermComError> {
-    if let Some(path) = config_path {
-        load_config_from_file(path).await
-    } else {
-        // Try to load from standard locations
-        let global_config = get_global_config_path().ok()
-            .and_then(|path| std::fs::metadata(&path).ok())
-            .map(|_| get_global_config_path().unwrap());
-            
-        let local_config = std::fs::metadata("termcom.toml").ok()
-            .map(|_| "termcom.toml".to_string());
-            
-        if let Some(path) = local_config {
-            load_config_from_file(&path).await
-        } else if let Some(path) = global_config {
-            load_config_from_file(&path).await
-        } else {
-            Ok(TermComConfig::default())
-        }
-    }
-}
-
-async fn load_config_from_file(path: &str) -> Result<TermComConfig, TermComError> {
-    let content = tokio::fs::read_to_string(path).await
-        .map_err(|e| TermComError::Configuration(format!("Failed to read config file '{}': {}", path, e)))?;
-    
-    toml::from_str(&content)
-        .map_err(|e| TermComError::Configuration(format!("Failed to parse config file '{}': {}", path, e)))
-}
-
-async fn save_config_to_file(config: &TermComConfig, path: &str) -> Result<(), TermComError> {
-    let content = toml::to_string_pretty(config)
-        .map_err(|e| TermComError::Configuration(format!("Failed to serialize config: {}", e)))?;
-    
-    tokio::fs::write(path, content).await
-        .map_err(|e| TermComError::Configuration(format!("Failed to write config file '{}': {}", path, e)))
-}
-
-fn get_global_config_path() -> Result<String, TermComError> {
-    let home = std::env::var("HOME")
-        .map_err(|_| TermComError::Configuration("HOME environment variable not set".to_string()))?;
-    let config_dir = PathBuf::from(home).join(".config").join("termcom");
-    std::fs::create_dir_all(&config_dir)
-        .map_err(|e| TermComError::Configuration(format!("Failed to create config directory: {}", e)))?;
-    Ok(config_dir.join("config.toml").to_string_lossy().to_string())
-}
 
 fn setup_logging(config: &crate::domain::config::GlobalConfig, verbose: bool) -> Result<(), TermComError> {
     let level = if verbose {

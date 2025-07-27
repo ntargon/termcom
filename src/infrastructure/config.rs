@@ -104,7 +104,7 @@ impl ConfigManager {
     }
 
     /// Load configuration from specific path
-    fn load_config_from_path(&self, path: &Path) -> TermComResult<TermComConfig> {
+    pub fn load_config_from_path(&self, path: &Path) -> TermComResult<TermComConfig> {
         let content = fs::read_to_string(path).map_err(|e| TermComError::Config {
             message: format!("Failed to read config file {}: {}", path.display(), e),
         })?;
@@ -115,7 +115,7 @@ impl ConfigManager {
     }
 
     /// Save configuration to specific path
-    fn save_config_to_path(&self, path: &Path, config: &TermComConfig) -> TermComResult<()> {
+    pub fn save_config_to_path(&self, path: &Path, config: &TermComConfig) -> TermComResult<()> {
         let content = toml::to_string_pretty(config).map_err(|e| TermComError::Config {
             message: format!("Failed to serialize config: {}", e),
         })?;
