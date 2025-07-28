@@ -19,16 +19,14 @@ use crate::{
     },
 };
 use super::{
-    event::{AppEvent, EventHandler},
     state::AppState,
-    ui::draw_ui,
+    ui::{draw_ui, ViewMode},
 };
 use std::sync::Arc;
 
 pub struct App {
     state: AppState,
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
-    event_handler: EventHandler,
     should_quit: bool,
     last_tick: Instant,
     tick_rate: Duration,
@@ -52,12 +50,10 @@ impl App {
         let session_manager = Arc::new(SessionManager::new(Arc::clone(&communication_engine), 10));
 
         let state = AppState::new();
-        let event_handler = EventHandler::new();
 
         Ok(Self {
             state,
             terminal,
-            event_handler,
             should_quit: false,
             last_tick: Instant::now(),
             tick_rate: Duration::from_millis(250),
@@ -108,64 +104,138 @@ impl App {
     }
 
     async fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> Result<bool, TermComError> {
-        // Global key bindings
-        match key.code {
-            KeyCode::Char('q') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                return Ok(true); // Quit
-            }
-            KeyCode::Esc => {
-                if self.state.input_mode {
+        // Input mode handling
+        if self.state.input_mode {
+            match key.code {
+                KeyCode::Enter => {
+                    let input = self.state.input_buffer.clone();
+                    self.state.input_buffer.clear();
+                    self.state.input_mode = false;
+                    
+                    match self.state.view_mode {
+                        ViewMode::Chat => {
+                            if let Some(session_id) = &self.state.selected_session {
+                                self.state.add_message(session_id.clone(), input, true).await?;
+                            }
+                        }
+                        ViewMode::Command => {
+                            self.handle_command(input).await?;
+                        }
+                        _ => {}
+                    }
+                }
+                KeyCode::Esc => {
                     self.state.input_mode = false;
                     self.state.input_buffer.clear();
-                } else {
-                    return Ok(true); // Quit
+                }
+                KeyCode::Backspace => {
+                    self.state.input_buffer.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.state.input_buffer.push(c);
+                }
+                _ => {}
+            }
+            return Ok(false);
+        }
+
+        // Normal mode key bindings
+        match key.code {
+            KeyCode::Char('q') => return Ok(true), // Quit
+            KeyCode::Esc => return Ok(true), // Quit
+            KeyCode::Char('h') => {
+                self.state.toggle_help();
+            }
+            KeyCode::Tab => {
+                self.state.view_mode = match self.state.view_mode {
+                    ViewMode::SessionList => ViewMode::Chat,
+                    ViewMode::Chat => ViewMode::Command,
+                    ViewMode::Command => ViewMode::SessionList,
+                };
+            }
+            KeyCode::Char('i') => {
+                if matches!(self.state.view_mode, ViewMode::Chat) {
+                    self.state.input_mode = true;
+                }
+            }
+            KeyCode::Char(':') => {
+                self.state.view_mode = ViewMode::Command;
+                self.state.input_mode = true;
+            }
+            KeyCode::Char('c') => {
+                if matches!(self.state.view_mode, ViewMode::SessionList) {
+                    self.state.view_mode = ViewMode::Command;
+                    self.state.input_mode = true;
+                    self.state.input_buffer = ":".to_string();
+                }
+            }
+            KeyCode::Enter => {
+                if matches!(self.state.view_mode, ViewMode::SessionList) {
+                    if self.state.selected_session.is_some() {
+                        self.state.view_mode = ViewMode::Chat;
+                    }
                 }
             }
             _ => {}
         }
 
-        // Handle events based on current state
-        let event = self.event_handler.handle_key_event(key, &mut self.state)?;
-        if let Some(app_event) = event {
-            self.handle_app_event(app_event).await?;
-        }
-
         Ok(false)
     }
 
-    async fn handle_app_event(&mut self, event: AppEvent) -> Result<(), TermComError> {
-        match event {
-            AppEvent::Quit => {
+    async fn handle_command(&mut self, command: String) -> Result<(), TermComError> {
+        let command = command.trim();
+        if !command.starts_with(':') {
+            self.state.set_status_message("Commands must start with ':'".to_string());
+            return Ok(());
+        }
+        
+        let command = &command[1..]; // Remove ':'
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        
+        match parts.get(0) {
+            Some(&"serial") => {
+                if parts.len() >= 3 {
+                    let port = parts[1].to_string();
+                    if let Ok(baud_rate) = parts[2].parse::<u32>() {
+                        self.state.create_serial_session(&self.session_manager, port, baud_rate).await?;
+                        self.state.view_mode = ViewMode::Chat;
+                    } else {
+                        self.state.set_status_message("Invalid baud rate".to_string());
+                    }
+                } else {
+                    self.state.set_status_message("Usage: :serial <port> <baud_rate>".to_string());
+                }
+            }
+            Some(&"tcp") => {
+                if parts.len() >= 3 {
+                    let host = parts[1].to_string();
+                    if let Ok(port) = parts[2].parse::<u16>() {
+                        self.state.create_tcp_session(&self.session_manager, host, port).await?;
+                        self.state.view_mode = ViewMode::Chat;
+                    } else {
+                        self.state.set_status_message("Invalid port number".to_string());
+                    }
+                } else {
+                    self.state.set_status_message("Usage: :tcp <host> <port>".to_string());
+                }
+            }
+            Some(&"close") => {
+                if let Some(session_id) = &self.state.selected_session {
+                    self.state.close_session(session_id.clone()).await?;
+                    self.state.view_mode = ViewMode::SessionList;
+                }
+            }
+            Some(&"quit") => {
                 self.should_quit = true;
             }
-            AppEvent::SwitchPanel(panel) => {
-                self.state.active_panel = panel;
-                self.state.input_mode = false;
+            Some(cmd) => {
+                self.state.set_status_message(format!("Unknown command: {}", cmd));
             }
-            AppEvent::ToggleInputMode => {
-                self.state.input_mode = !self.state.input_mode;
-                if !self.state.input_mode {
-                    self.state.input_buffer.clear();
-                }
-            }
-            AppEvent::SendMessage(message) => {
-                if let Some(session_id) = &self.state.selected_session {
-                    self.state.add_message(session_id.clone(), message, true).await?;
-                }
-            }
-            AppEvent::ConnectSerial { port, baud_rate } => {
-                self.state.create_serial_session(&self.session_manager, port, baud_rate).await?;
-            }
-            AppEvent::ConnectTcp { host, port } => {
-                self.state.create_tcp_session(&self.session_manager, host, port).await?;
-            }
-            AppEvent::SelectSession(session_id) => {
-                self.state.selected_session = Some(session_id);
-            }
-            AppEvent::CloseSession(session_id) => {
-                self.state.close_session(session_id).await?;
+            None => {
+                self.state.set_status_message("Empty command".to_string());
             }
         }
+        
         Ok(())
     }
 

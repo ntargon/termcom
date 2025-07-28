@@ -6,11 +6,11 @@ use crate::{
     domain::{error::TermComError, config::{DeviceConfig, ConnectionConfig}},
 };
 
-use super::{ui::ActivePanel, widgets::chat::ChatMessage};
+use super::{ui::ViewMode, widgets::main::ChatMessage};
 
 #[derive(Debug)]
 pub struct AppState {
-    pub active_panel: ActivePanel,
+    pub view_mode: ViewMode,
     pub input_mode: bool,
     pub input_buffer: String,
     pub terminal_size: (u16, u16),
@@ -34,7 +34,7 @@ pub struct SessionState {
 impl AppState {
     pub fn new() -> Self {
         Self {
-            active_panel: ActivePanel::Sessions,
+            view_mode: ViewMode::SessionList,
             input_mode: false,
             input_buffer: String::new(),
             terminal_size: (80, 24),
