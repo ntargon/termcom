@@ -1,8 +1,7 @@
-use std::collections::HashMap;
 use std::time::SystemTime;
 
 use crate::{
-    core::session::{SessionId, SessionType, SessionManager, SessionConfig},
+    core::session::{SessionManager, SessionConfig},
     domain::{error::TermComError, config::{DeviceConfig, ConnectionConfig}},
 };
 
@@ -14,200 +13,127 @@ pub struct AppState {
     pub input_mode: bool,
     pub input_buffer: String,
     pub terminal_size: (u16, u16),
-    pub selected_session: Option<SessionId>,
-    pub sessions: HashMap<SessionId, SessionState>,
+    pub connection: Option<Connection>,
     pub status_message: Option<String>,
     pub show_help: bool,
 }
 
 #[derive(Debug)]
-pub struct SessionState {
-    pub id: SessionId,
+pub struct Connection {
     pub name: String,
-    pub session_type: SessionType,
-    pub messages: Vec<ChatMessage>,
-    pub connected: bool,
-    pub last_activity: SystemTime,
     pub config_info: String,
+    pub connected: bool,
+    pub messages: Vec<ChatMessage>,
+    pub last_activity: SystemTime,
 }
 
 impl AppState {
     pub fn new() -> Self {
         Self {
-            view_mode: ViewMode::SessionList,
+            view_mode: ViewMode::Chat,
             input_mode: false,
             input_buffer: String::new(),
             terminal_size: (80, 24),
-            selected_session: None,
-            sessions: HashMap::new(),
-            status_message: Some("Welcome to TermCom TUI! Press 'h' for help.".to_string()),
+            connection: None,
+            status_message: Some("Welcome to TermCom TUI! Press ':' to connect or 'h' for help.".to_string()),
             show_help: false,
         }
     }
 
-    pub async fn create_serial_session(&mut self, session_manager: &SessionManager, port: String, baud_rate: u32) -> Result<SessionId, TermComError> {
-        // Create device config for serial connection
-        let device_config = DeviceConfig {
-            name: format!("Serial {}", port),
-            description: format!("Serial connection on {} at {} baud", port, baud_rate),
-            connection: ConnectionConfig::Serial {
-                port: port.clone(),
-                baud_rate,
-                data_bits: 8,
-                stop_bits: 1,
-                parity: crate::domain::config::ParityConfig::None,
-                flow_control: crate::domain::config::FlowControlConfig::None,
-            },
-            commands: Vec::new(),
-        };
+    pub async fn create_serial_connection(&mut self, _session_manager: &SessionManager, port: String, baud_rate: u32) -> Result<(), TermComError> {
+        // Close existing connection if any
+        if self.connection.is_some() {
+            self.close_connection().await?;
+        }
 
-        // Create session config
-        let session_config = SessionConfig {
+        // TODO: Implement actual serial connection
+        // For now, create a mock connection
+        let connection = Connection {
             name: format!("Serial {}", port),
-            session_type: SessionType::Interactive,
-            device_config,
-            auto_reconnect: true,
-            max_reconnect_attempts: 3,
-            reconnect_delay_ms: 1000,
-            timeout_ms: 5000,
-            max_history_size: 1000,
-            log_activities: true,
-            tags: vec!["serial".to_string()],
-            properties: std::collections::HashMap::new(),
-        };
-
-        // Create session using the real session manager
-        let session_id = session_manager.create_session(session_config).await?;
-        
-        // Create TUI session state for tracking
-        let session_state = SessionState {
-            id: session_id.clone(),
-            name: format!("Serial {}", port),
-            session_type: SessionType::Interactive,
-            messages: Vec::new(),
-            connected: true,
-            last_activity: SystemTime::now(),
             config_info: format!("Port: {}, Baud: {}", port, baud_rate),
+            connected: true,
+            messages: Vec::new(),
+            last_activity: SystemTime::now(),
         };
 
-        self.sessions.insert(session_id.clone(), session_state);
-        self.selected_session = Some(session_id.clone());
+        self.connection = Some(connection);
         self.status_message = Some(format!("Connected to serial port: {}", port));
 
-        Ok(session_id)
+        Ok(())
     }
 
-    pub async fn create_tcp_session(&mut self, session_manager: &SessionManager, host: String, port: u16) -> Result<SessionId, TermComError> {
-        // Create device config for TCP connection
-        let device_config = DeviceConfig {
-            name: format!("TCP {}:{}", host, port),
-            description: format!("TCP connection to {}:{}", host, port),
-            connection: ConnectionConfig::Tcp {
-                host: host.clone(),
-                port,
-                timeout_ms: 3000,
-                keep_alive: true,
-            },
-            commands: Vec::new(),
-        };
+    pub async fn create_tcp_connection(&mut self, _session_manager: &SessionManager, host: String, port: u16) -> Result<(), TermComError> {
+        // Close existing connection if any
+        if self.connection.is_some() {
+            self.close_connection().await?;
+        }
 
-        // Create session config
-        let session_config = SessionConfig {
+        // TODO: Implement actual TCP connection
+        // For now, create a mock connection
+        let connection = Connection {
             name: format!("TCP {}:{}", host, port),
-            session_type: SessionType::Interactive,
-            device_config,
-            auto_reconnect: true,
-            max_reconnect_attempts: 3,
-            reconnect_delay_ms: 1000,
-            timeout_ms: 5000,
-            max_history_size: 1000,
-            log_activities: true,
-            tags: vec!["tcp".to_string()],
-            properties: std::collections::HashMap::new(),
-        };
-
-        // Create session using the real session manager
-        let session_id = session_manager.create_session(session_config).await?;
-        
-        // Create TUI session state for tracking
-        let session_state = SessionState {
-            id: session_id.clone(),
-            name: format!("TCP {}:{}", host, port),
-            session_type: SessionType::Interactive,
-            messages: Vec::new(),
-            connected: true,
-            last_activity: SystemTime::now(),
             config_info: format!("Host: {}, Port: {}", host, port),
+            connected: true,
+            messages: Vec::new(),
+            last_activity: SystemTime::now(),
         };
 
-        self.sessions.insert(session_id.clone(), session_state);
-        self.selected_session = Some(session_id.clone());
+        self.connection = Some(connection);
         self.status_message = Some(format!("Connected to TCP: {}:{}", host, port));
 
-        Ok(session_id)
+        Ok(())
     }
 
-    pub async fn add_message(&mut self, session_id: SessionId, content: String, is_sent: bool) -> Result<(), TermComError> {
-        if let Some(session_state) = self.sessions.get_mut(&session_id) {
+    pub async fn add_message(&mut self, content: String, is_sent: bool) -> Result<(), TermComError> {
+        if let Some(connection) = &mut self.connection {
             let message = ChatMessage {
-                content,
+                content: content.clone(),
                 timestamp: SystemTime::now(),
                 is_sent,
-                session_id: session_id.clone(),
             };
 
-            session_state.messages.push(message);
-            session_state.last_activity = SystemTime::now();
+            connection.messages.push(message);
+            connection.last_activity = SystemTime::now();
 
             // TODO: Implement actual message sending
             // For now, just simulate echo if it's sent
             if is_sent {
                 // Simulate echo after a short delay
                 let echo_message = ChatMessage {
-                    content: format!("Echo: {}", session_state.messages.last().unwrap().content),
+                    content: format!("Echo: {}", content),
                     timestamp: SystemTime::now(),
                     is_sent: false,
-                    session_id: session_id.clone(),
                 };
-                session_state.messages.push(echo_message);
+                connection.messages.push(echo_message);
             }
         }
 
         Ok(())
     }
 
-    pub async fn close_session(&mut self, session_id: SessionId) -> Result<(), TermComError> {
-        if let Some(session_state) = self.sessions.remove(&session_id) {
-            // TODO: Implement actual session closing
-            
-            if self.selected_session.as_ref() == Some(&session_id) {
-                self.selected_session = self.sessions.keys().next().cloned();
-            }
-            
-            self.status_message = Some(format!("Closed session: {}", session_state.name));
+    pub async fn close_connection(&mut self) -> Result<(), TermComError> {
+        if let Some(connection) = self.connection.take() {
+            // TODO: Implement actual connection closing
+            self.status_message = Some(format!("Closed connection: {}", connection.name));
+        } else {
+            self.status_message = Some("No connection to close".to_string());
         }
 
         Ok(())
     }
 
-    pub async fn update_sessions(&mut self) -> Result<(), TermComError> {
-        // TODO: Implement actual session updates
-        // For now, this is a no-op since we're using mock sessions
+    pub async fn update_connection(&mut self) -> Result<(), TermComError> {
+        // TODO: Implement actual connection updates
+        // For now, this is a no-op since we're using mock connections
         Ok(())
     }
 
-    pub fn get_session_list(&self) -> Vec<(&SessionId, &SessionState)> {
-        let mut sessions: Vec<_> = self.sessions.iter().collect();
-        sessions.sort_by_key(|(_, state)| std::cmp::Reverse(state.last_activity));
-        sessions
+    pub fn get_connection(&self) -> Option<&Connection> {
+        self.connection.as_ref()
     }
 
-    pub fn get_selected_session(&self) -> Option<&SessionState> {
-        self.selected_session.as_ref().and_then(|id| self.sessions.get(id))
-    }
-
-    pub fn get_selected_session_mut(&mut self) -> Option<&mut SessionState> {
-        self.selected_session.as_ref().and_then(|id| self.sessions.get_mut(id))
+    pub fn get_connection_mut(&mut self) -> Option<&mut Connection> {
+        self.connection.as_mut()
     }
 
     pub fn set_status_message(&mut self, message: String) {

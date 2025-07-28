@@ -15,7 +15,6 @@ use super::{
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ViewMode {
-    SessionList,
     Chat,
     Command,
 }
@@ -23,7 +22,6 @@ pub enum ViewMode {
 impl std::fmt::Display for ViewMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ViewMode::SessionList => write!(f, "Sessions"),
             ViewMode::Chat => write!(f, "Chat"),
             ViewMode::Command => write!(f, "Command"),
         }
@@ -60,14 +58,14 @@ pub fn draw_ui(f: &mut Frame, state: &mut AppState) {
 }
 
 fn render_header_bar(f: &mut Frame, area: Rect, state: &AppState) {
-    let status_text = if let Some(session) = state.get_selected_session() {
+    let status_text = if let Some(connection) = state.get_connection() {
         format!("[{}] {} | Mode: {}", 
-            if session.connected { "●" } else { "○" },
-            session.name,
+            if connection.connected { "●" } else { "○" },
+            connection.name,
             state.view_mode
         )
     } else {
-        format!("No session | Mode: {} | Press 'h' for help", state.view_mode)
+        format!("No connection | Mode: {} | Press ':' to connect", state.view_mode)
     };
 
     let header = Paragraph::new(status_text)
@@ -91,8 +89,13 @@ fn render_input_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
         format!("» {}", state.input_buffer)
     } else {
         match state.view_mode {
-            ViewMode::SessionList => "Press 'Enter' to connect, 'c' for new connection".to_string(),
-            ViewMode::Chat => "Press 'i' to send message".to_string(),
+            ViewMode::Chat => {
+                if state.get_connection().is_some() {
+                    "Press 'i' to send message".to_string()
+                } else {
+                    "Press ':' to connect".to_string()
+                }
+            },
             ViewMode::Command => "Type command and press Enter".to_string(),
         }
     };
@@ -114,7 +117,7 @@ fn render_input_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
     }
 
     // Help hint
-    let help_text = "q: quit | h: help | Tab: switch mode | Esc: cancel";
+    let help_text = "q: quit | h: help | Tab: Chat ↔ Command | Esc: cancel";
     let help = Paragraph::new(help_text)
         .style(Style::default().fg(Color::DarkGray));
     f.render_widget(help, chunks[2]);

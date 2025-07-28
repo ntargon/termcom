@@ -114,14 +114,13 @@ impl App {
                     
                     match self.state.view_mode {
                         ViewMode::Chat => {
-                            if let Some(session_id) = &self.state.selected_session {
-                                self.state.add_message(session_id.clone(), input, true).await?;
+                            if self.state.get_connection().is_some() {
+                                self.state.add_message(input, true).await?;
                             }
                         }
                         ViewMode::Command => {
                             self.handle_command(input).await?;
                         }
-                        _ => {}
                     }
                 }
                 KeyCode::Esc => {
@@ -148,9 +147,8 @@ impl App {
             }
             KeyCode::Tab => {
                 self.state.view_mode = match self.state.view_mode {
-                    ViewMode::SessionList => ViewMode::Chat,
                     ViewMode::Chat => ViewMode::Command,
-                    ViewMode::Command => ViewMode::SessionList,
+                    ViewMode::Command => ViewMode::Chat,
                 };
             }
             KeyCode::Char('i') => {
@@ -161,20 +159,6 @@ impl App {
             KeyCode::Char(':') => {
                 self.state.view_mode = ViewMode::Command;
                 self.state.input_mode = true;
-            }
-            KeyCode::Char('c') => {
-                if matches!(self.state.view_mode, ViewMode::SessionList) {
-                    self.state.view_mode = ViewMode::Command;
-                    self.state.input_mode = true;
-                    self.state.input_buffer = ":".to_string();
-                }
-            }
-            KeyCode::Enter => {
-                if matches!(self.state.view_mode, ViewMode::SessionList) {
-                    if self.state.selected_session.is_some() {
-                        self.state.view_mode = ViewMode::Chat;
-                    }
-                }
             }
             _ => {}
         }
@@ -197,7 +181,7 @@ impl App {
                 if parts.len() >= 3 {
                     let port = parts[1].to_string();
                     if let Ok(baud_rate) = parts[2].parse::<u32>() {
-                        self.state.create_serial_session(&self.session_manager, port, baud_rate).await?;
+                        self.state.create_serial_connection(&self.session_manager, port, baud_rate).await?;
                         self.state.view_mode = ViewMode::Chat;
                     } else {
                         self.state.set_status_message("Invalid baud rate".to_string());
@@ -210,7 +194,7 @@ impl App {
                 if parts.len() >= 3 {
                     let host = parts[1].to_string();
                     if let Ok(port) = parts[2].parse::<u16>() {
-                        self.state.create_tcp_session(&self.session_manager, host, port).await?;
+                        self.state.create_tcp_connection(&self.session_manager, host, port).await?;
                         self.state.view_mode = ViewMode::Chat;
                     } else {
                         self.state.set_status_message("Invalid port number".to_string());
@@ -220,10 +204,7 @@ impl App {
                 }
             }
             Some(&"close") => {
-                if let Some(session_id) = &self.state.selected_session {
-                    self.state.close_session(session_id.clone()).await?;
-                    self.state.view_mode = ViewMode::SessionList;
-                }
+                self.state.close_connection().await?;
             }
             Some(&"quit") => {
                 self.should_quit = true;
@@ -240,8 +221,8 @@ impl App {
     }
 
     async fn tick(&mut self) -> Result<(), TermComError> {
-        // Update session status and receive messages
-        self.state.update_sessions().await?;
+        // Update connection status and receive messages
+        self.state.update_connection().await?;
         Ok(())
     }
 }
